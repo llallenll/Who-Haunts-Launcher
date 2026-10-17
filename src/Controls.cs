@@ -7,18 +7,20 @@ namespace GhostHunterLauncher
 {
     static class Theme
     {
-        // Taken from the logo: navy backdrop, teal hexagon, orange rim.
-        public static readonly Color Background = Color.FromArgb(13, 21, 32);
-        public static readonly Color Panel = Color.FromArgb(20, 32, 47);
-        public static readonly Color Border = Color.FromArgb(38, 56, 76);
-        public static readonly Color Text = Color.FromArgb(229, 229, 225);
-        public static readonly Color Muted = Color.FromArgb(128, 148, 166);
-        public static readonly Color Accent = Color.FromArgb(255, 194, 92);
-        public static readonly Color AccentHover = Color.FromArgb(255, 212, 138);
-        public static readonly Color AccentText = Color.FromArgb(20, 32, 47);
-        public static readonly Color Teal = Color.FromArgb(61, 163, 168);
-        public static readonly Color Error = Color.FromArgb(255, 128, 118);
-        public static readonly Color HeaderTop = Color.FromArgb(22, 58, 72);
+        // The game's burnt-paper diary: scorched parchment with ink on it, a charred leather bar, blood-red ink.
+        public static readonly Color Background = Color.FromArgb(150, 117, 80);   // paper (behind assets\paper.png)
+        public static readonly Color Panel = Color.FromArgb(126, 96, 64);         // the patch-notes inset on the page
+        public static readonly Color Ink = Color.FromArgb(24, 15, 9);             // text on paper
+        public static readonly Color Pencil = Color.FromArgb(58, 40, 26);         // quieter text on paper
+        public static readonly Color RedInk = Color.FromArgb(122, 18, 10);
+        public static readonly Color Bar = Color.FromArgb(34, 20, 13);            // charred leather along the bottom
+        public static readonly Color Border = Color.FromArgb(78, 52, 34);         // progress track, disabled button
+        public static readonly Color Text = Color.FromArgb(236, 222, 196);        // text on the bar
+        public static readonly Color Muted = Color.FromArgb(172, 146, 112);       // quieter text on the bar
+        public static readonly Color Accent = Color.FromArgb(150, 24, 14);
+        public static readonly Color AccentHover = Color.FromArgb(182, 38, 24);
+        public static readonly Color AccentText = Color.FromArgb(240, 226, 200);
+        public static readonly Color Error = Color.FromArgb(255, 140, 120);
 
         public static GraphicsPath Rounded(Rectangle r, int radius)
         {
@@ -101,10 +103,10 @@ namespace GhostHunterLauncher
         }
     }
 
-    /// <summary>Painted header: logo and game title over a gradient.</summary>
+    /// <summary>Painted header: the Who Haunts logo and "early access" in red ink, on the window's burnt paper.</summary>
     class HeaderPanel : Panel
     {
-        readonly Image logo = Resources.Logo;
+        readonly Image logo = Resources.FullLogo;
 
         public HeaderPanel()
         {
@@ -115,32 +117,34 @@ namespace GhostHunterLauncher
         protected override void OnPaint(PaintEventArgs e)
         {
             var g = e.Graphics;
-            using (var brush = new LinearGradientBrush(ClientRectangle, Theme.HeaderTop, Theme.Background, LinearGradientMode.Vertical))
-                g.FillRectangle(brush, ClientRectangle);
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            // The same paper as the window behind it, so the header has no seam.
+            var form = FindForm();
+            if (Resources.Paper != null && form != null)
+                g.DrawImage(Resources.Paper, new Rectangle(-Left, -Top, form.ClientSize.Width, form.ClientSize.Height));
+            else
+                g.Clear(Theme.Background);
 
             var scale = DeviceDpi / 96f;
-            var x = (int)(32 * scale);
+            var x = (int)(28 * scale);
             if (logo != null)
             {
-                var size = (int)(88 * scale);
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                g.DrawImage(logo, new Rectangle(x - (int)(6 * scale), (Height - size) / 2, size, size));
-                x += size + (int)(10 * scale);
+                var height = Height - (int)(10 * scale);
+                var width = height * logo.Width / logo.Height;
+                g.DrawImage(logo, new Rectangle(x, (Height - height) / 2, width, height));
+                x += width + (int)(18 * scale);
             }
-            using (var titleFont = new Font("Segoe UI Black", 30f, FontStyle.Regular))
-            using (var subFont = new Font("Segoe UI Semibold", 10f, FontStyle.Regular))
-            {
-                TextRenderer.DrawText(g, LauncherConfig.Title, titleFont, new Point(x - (int)(4 * scale), (int)(22 * scale)), Theme.Text);
-                TextRenderer.DrawText(g, LauncherConfig.Subtitle, subFont, new Point(x, (int)(80 * scale)), Theme.Accent);
-            }
+            using (var subFont = new Font("Georgia", 11f, FontStyle.Bold | FontStyle.Italic))
+                TextRenderer.DrawText(g, LauncherConfig.Subtitle, subFont, new Point(x, Height - (int)(40 * scale)), Theme.RedInk);
         }
     }
 
     /// <summary>Images compiled into the exe by build.ps1 (/resource).</summary>
     static class Resources
     {
-        public static readonly Image Logo = LoadImage("GhostHunterLauncher.logo.png");
+        public static readonly Image FullLogo = LoadImage("GhostHunterLauncher.logo-full.png");
+        public static readonly Image Paper = LoadImage("GhostHunterLauncher.paper.png");
         public static readonly Icon AppIcon = LoadIcon("GhostHunterLauncher.icon.ico");
 
         static Image LoadImage(string name)
@@ -163,11 +167,12 @@ namespace GhostHunterLauncher
             Text = text;
             AutoSize = true;
             Cursor = Cursors.Hand;
-            ForeColor = Theme.Muted;
-            Font = new Font("Segoe UI", 9f);
+            ForeColor = Theme.Pencil;
+            BackColor = Color.Transparent;
+            Font = new Font("Georgia", 9.5f, FontStyle.Italic);
         }
 
-        protected override void OnMouseEnter(EventArgs e) { if (Enabled) ForeColor = Theme.Text; base.OnMouseEnter(e); }
-        protected override void OnMouseLeave(EventArgs e) { ForeColor = Theme.Muted; base.OnMouseLeave(e); }
+        protected override void OnMouseEnter(EventArgs e) { if (Enabled) ForeColor = Theme.RedInk; base.OnMouseEnter(e); }
+        protected override void OnMouseLeave(EventArgs e) { ForeColor = Theme.Pencil; base.OnMouseLeave(e); }
     }
 }

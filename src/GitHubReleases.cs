@@ -45,7 +45,7 @@ namespace GhostHunterLauncher
         {
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
             Http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-            Http.DefaultRequestHeaders.UserAgent.ParseAdd("GhostHunterLauncher/1.0");
+            Http.DefaultRequestHeaders.UserAgent.ParseAdd("WhoHauntsLauncher/1.1");
         }
 
         /// <summary>Newest game build.</summary>

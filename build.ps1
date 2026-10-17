@@ -1,5 +1,5 @@
-# Builds bin\GhostHunterLauncher.exe with the C# compiler that ships with Visual Studio, then
-# bin\GhostHunterLauncherSetup.exe with Inno Setup (winget install JRSoftware.InnoSetup).
+# Builds bin\WhoHauntsLauncher.exe with the C# compiler that ships with Visual Studio, then
+# bin\WhoHauntsLauncherSetup.exe with Inno Setup (winget install JRSoftware.InnoSetup).
 # Targets .NET Framework 4.x, which is built into Windows 10/11, so testers need nothing else installed.
 param([switch] $NoInstaller)
 $ErrorActionPreference = 'Stop'
@@ -14,7 +14,7 @@ if (-not $csc) { throw "Couldn't find csc.exe. Install Visual Studio (any editio
 
 $out = Join-Path $here 'bin'
 New-Item -ItemType Directory -Force $out | Out-Null
-$exe = Join-Path $out 'GhostHunterLauncher.exe'
+$exe = Join-Path $out 'WhoHauntsLauncher.exe'
 $assets = Join-Path $here 'assets'
 
 $compilerArgs = @(
@@ -22,7 +22,8 @@ $compilerArgs = @(
     "/out:$exe",
     "/win32manifest:$(Join-Path $here 'app.manifest')",
     "/win32icon:$(Join-Path $assets 'icon.ico')",
-    "/resource:$(Join-Path $assets 'logo.png'),GhostHunterLauncher.logo.png",
+    "/resource:$(Join-Path $assets 'logo-full.png'),GhostHunterLauncher.logo-full.png",
+    "/resource:$(Join-Path $assets 'paper.png'),GhostHunterLauncher.paper.png",
     "/resource:$(Join-Path $assets 'icon.ico'),GhostHunterLauncher.icon.ico",
     '/r:System.dll', '/r:System.Core.dll', '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll',
     '/r:System.Net.Http.dll', '/r:System.IO.Compression.dll', '/r:System.IO.Compression.FileSystem.dll',
@@ -40,4 +41,4 @@ $iscc = @("$env:LOCALAPPDATA\Programs\Inno Setup 6\ISCC.exe", "${env:ProgramFile
 if (-not $iscc) { Write-Warning "Inno Setup not found; skipping installer. Run: winget install JRSoftware.InnoSetup"; return }
 & $iscc /Q (Join-Path $here 'installer\GhostHunterLauncher.iss')
 if ($LASTEXITCODE -ne 0) { throw "Installer build failed." }
-Write-Host "Built $(Join-Path $out 'GhostHunterLauncherSetup.exe')"
+Write-Host "Built $(Join-Path $out 'WhoHauntsLauncherSetup.exe')"

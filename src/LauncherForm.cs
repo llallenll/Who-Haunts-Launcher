@@ -35,21 +35,27 @@ namespace GhostHunterLauncher
             SuspendLayout();
             AutoScaleDimensions = new SizeF(96f, 96f);
             AutoScaleMode = AutoScaleMode.Dpi;
-            Text = "Ghost Hunter Launcher";
+            Text = "Who Haunts Launcher";
             ClientSize = new Size(900, 560);
             FormBorderStyle = FormBorderStyle.FixedSingle;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = Theme.Background;
-            ForeColor = Theme.Text;
+            ForeColor = Theme.Ink;
+            if (Resources.Paper != null)
+            {
+                BackgroundImage = Resources.Paper;
+                BackgroundImageLayout = ImageLayout.Stretch;
+            }
             Font = new Font("Segoe UI", 9.5f);
             if (Resources.AppIcon != null) Icon = Resources.AppIcon;
 
             header.SetBounds(0, 0, 900, 120);
 
             notesTitle.SetBounds(32, 132, 836, 22);
-            notesTitle.Font = new Font("Segoe UI Semibold", 9f);
-            notesTitle.ForeColor = Theme.Muted;
+            notesTitle.Font = new Font("Georgia", 9.5f, FontStyle.Bold);
+            notesTitle.ForeColor = Theme.RedInk;
+            notesTitle.BackColor = Color.Transparent;
             notesTitle.Text = "PATCH NOTES";
 
             var notesFrame = new Panel { BackColor = Theme.Panel, Padding = new Padding(14, 12, 6, 12) };
@@ -60,8 +66,8 @@ namespace GhostHunterLauncher
             notesBox.ScrollBars = ScrollBars.Vertical;
             notesBox.BorderStyle = BorderStyle.None;
             notesBox.BackColor = Theme.Panel;
-            notesBox.ForeColor = Theme.Text;
-            notesBox.Font = new Font("Segoe UI", 10f);
+            notesBox.ForeColor = Theme.Ink;
+            notesBox.Font = new Font("Georgia", 10f);
             notesBox.TabStop = false;
             notesFrame.Controls.Add(notesBox);
 
@@ -73,10 +79,10 @@ namespace GhostHunterLauncher
             refreshLink.Click += async (s, e) => { if (mode != Mode.Downloading && mode != Mode.Busy) await CheckForUpdatesAsync(); };
 
             bottomBar.SetBounds(0, 460, 900, 100);
-            bottomBar.BackColor = Theme.Panel;
+            bottomBar.BackColor = Theme.Bar;
 
             statusLabel.SetBounds(32, 22, 600, 22);
-            statusLabel.Font = new Font("Segoe UI Semibold", 10f);
+            statusLabel.Font = new Font("Georgia", 10.5f, FontStyle.Bold);
             statusLabel.AutoEllipsis = true;
             progressBar.SetBounds(32, 50, 600, 6);
             progressBar.Visible = false;
@@ -85,7 +91,7 @@ namespace GhostHunterLauncher
             versionLabel.Font = new Font("Segoe UI", 8.5f);
 
             actionButton.SetBounds(668, 24, 200, 52);
-            actionButton.Font = new Font("Segoe UI Black", 13f);
+            actionButton.Font = new Font("Georgia", 14f, FontStyle.Bold);
             actionButton.Click += async (s, e) => await OnActionAsync();
 
             bottomBar.Controls.AddRange(new Control[] { statusLabel, progressBar, versionLabel, actionButton });
@@ -159,7 +165,7 @@ namespace GhostHunterLauncher
             if (latest == null) return;
             if (Installer.IsGameRunning())
             {
-                SetMode(mode, "Close Ghost Hunter before updating.", true);
+                SetMode(mode, "Close Who Haunts before updating.", true);
                 return;
             }
             if (!HasRoomFor(latest.AssetSize))
@@ -233,7 +239,7 @@ namespace GhostHunterLauncher
                 return;
             }
             var answer = MessageBox.Show(this, "Re-download and reinstall " + latest.Tag + "?\n\nYour saves and settings are kept.",
-                "Repair Ghost Hunter", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
+                "Repair Who Haunts", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
             if (answer == DialogResult.OK) await InstallAsync();
         }
 
@@ -266,7 +272,7 @@ namespace GhostHunterLauncher
         {
             if (mode == Mode.Downloading || (mode == Mode.Busy && progressBar.Visible))
             {
-                var answer = MessageBox.Show(this, "An install is in progress. Cancel it and quit?", "Ghost Hunter Launcher",
+                var answer = MessageBox.Show(this, "An install is in progress. Cancel it and quit?", "Who Haunts Launcher",
                     MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
                 if (answer != DialogResult.Yes || mode == Mode.Busy) { e.Cancel = true; return; }
                 if (downloadCts != null) downloadCts.Cancel();

@@ -11,10 +11,10 @@ namespace GhostHunterLauncher
         public const string RepoName = "Ghost-Hunter-Releases";
 
         // Zip asset attached to each release (see Tools/publish-release.ps1). Falls back to any .zip.
-        public const string AssetName = "GhostHunter-Windows.zip";
+        public const string AssetName = "WhoHaunts-Windows.zip";
 
         // Executable inside the zip (Unity names it after Player Settings > Product Name).
-        public const string GameExeName = "Ghost Hunter.exe";
+        public const string GameExeName = "Who Haunts.exe";
 
         // Early access builds are usually marked "pre-release" on GitHub; count them as updates.
         public const bool IncludePrereleases = true;
@@ -23,13 +23,14 @@ namespace GhostHunterLauncher
         // Tags are the launcher version (v1.0.1); the launcher replaces itself when a newer one is out.
         public const string LauncherRepoOwner = "llallenll";
         public const string LauncherRepoName = "Ghost-Hunter-Launcher";
-        public const string LauncherAssetName = "GhostHunterLauncher.exe";
+        // Releases also carry a copy named GhostHunterLauncher.exe, the name launchers before the rename look for.
+        public const string LauncherAssetName = "WhoHauntsLauncher.exe";
 
-        public const string Title = "GHOST HUNTER";
+        public const string Title = "WHO HAUNTS";
         public const string Subtitle = "EARLY ACCESS";
 
-        // %LOCALAPPDATA%\GhostHunter — per-user, no admin rights needed.
+        // %LOCALAPPDATA%\WhoHaunts — per-user, no admin rights needed. (Was GhostHunter; see Migration.)
         public static readonly string InstallRoot = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "GhostHunter");
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "WhoHaunts");
     }
 }

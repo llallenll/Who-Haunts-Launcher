@@ -1,4 +1,4 @@
-# Cuts the hexagon logo out of assets\logo-source.png (flat dark background) and writes
+# Scales the Who Haunts icon in assets\logo-source.png (a square PNG, already cut out on transparency) and writes
 #   assets\logo.png  - 256px transparent logo shown in the launcher window
 #   assets\icon.ico  - multi-size exe/installer icon
 # Rerun after replacing logo-source.png.
@@ -8,39 +8,13 @@ Add-Type -AssemblyName System.Drawing
 $assets = Join-Path $PSScriptRoot '..\assets'
 $src = [Drawing.Bitmap]::FromFile((Resolve-Path $Source))
 
-# Find the logo's bounds: everything that differs clearly from the corner background colour.
-$bg = $src.GetPixel(1, 1)
-$minX = $src.Width; $minY = $src.Height; $maxX = 0; $maxY = 0
-for ($y = 0; $y -lt $src.Height; $y++) {
-    for ($x = 0; $x -lt $src.Width; $x++) {
-        $c = $src.GetPixel($x, $y)
-        if ([math]::Abs($c.R - $bg.R) + [math]::Abs($c.G - $bg.G) + [math]::Abs($c.B - $bg.B) -gt 60) {
-            if ($x -lt $minX) { $minX = $x }; if ($x -gt $maxX) { $maxX = $x }
-            if ($y -lt $minY) { $minY = $y }; if ($y -gt $maxY) { $maxY = $y }
-        }
-    }
-}
-# Point-up regular hexagon: radius is half its height. Shrink slightly to drop background-blended edge pixels.
-$cx = ($minX + $maxX + 1) / 2.0; $cy = ($minY + $maxY + 1) / 2.0
-$radius = ($maxY - $minY + 1) / 2.0 - 0.6
-
 function New-Logo([int] $size) {
-    $pad = [math]::Max(0.5, $size / 64.0)
-    $scale = ($size / 2.0 - $pad) / $radius
+    $pad = [math]::Max(0.0, [math]::Floor($size / 64.0))
     $bmp = New-Object Drawing.Bitmap $size, $size, ([Drawing.Imaging.PixelFormat]::Format32bppArgb)
     $g = [Drawing.Graphics]::FromImage($bmp)
     $g.SmoothingMode = 'AntiAlias'; $g.InterpolationMode = 'HighQualityBicubic'; $g.PixelOffsetMode = 'HighQuality'
-    $points = for ($i = 0; $i -lt 6; $i++) {
-        $a = [math]::PI / 180 * (60 * $i - 90)
-        New-Object Drawing.PointF ([float]($size / 2.0 + [math]::Cos($a) * $radius * $scale)), ([float]($size / 2.0 + [math]::Sin($a) * $radius * $scale))
-    }
-    # Fill the hexagon with the source image, scaled about its centre.
-    $brush = New-Object Drawing.TextureBrush $src, ([Drawing.Drawing2D.WrapMode]::Clamp)
-    $brush.TranslateTransform([float]($size / 2.0), [float]($size / 2.0))
-    $brush.ScaleTransform([float]$scale, [float]$scale)
-    $brush.TranslateTransform([float](-$cx), [float](-$cy))
-    $g.FillPolygon($brush, [Drawing.PointF[]]$points)
-    $brush.Dispose(); $g.Dispose()
+    $g.DrawImage($src, [float]$pad, [float]$pad, [float]($size - 2 * $pad), [float]($size - 2 * $pad))
+    $g.Dispose()
     return $bmp
 }
 
@@ -94,4 +68,4 @@ foreach ($img in $images) { $w.Write($img) }
 $w.Flush()
 [IO.File]::WriteAllBytes((Join-Path $assets 'icon.ico'), $ico.ToArray())
 $src.Dispose()
-Write-Host "Wrote assets\logo.png and assets\icon.ico (hexagon centre $cx,$cy radius $radius)"
+Write-Host "Wrote assets\logo.png and assets\icon.ico"
