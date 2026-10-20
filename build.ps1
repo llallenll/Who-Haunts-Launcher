@@ -23,6 +23,7 @@ $compilerArgs = @(
     "/win32manifest:$(Join-Path $here 'app.manifest')",
     "/win32icon:$(Join-Path $assets 'icon.ico')",
     "/resource:$(Join-Path $assets 'logo-full.png'),GhostHunterLauncher.logo-full.png",
+    "/resource:$(Join-Path $assets 'logo.png'),GhostHunterLauncher.logo.png",
     "/resource:$(Join-Path $assets 'paper.png'),GhostHunterLauncher.paper.png",
     "/resource:$(Join-Path $assets 'icon.ico'),GhostHunterLauncher.icon.ico",
     '/r:System.dll', '/r:System.Core.dll', '/r:System.Drawing.dll', '/r:System.Windows.Forms.dll',

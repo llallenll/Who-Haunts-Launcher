@@ -1,116 +1,214 @@
 using System;
 using System.Diagnostics;
 using System.Drawing;
+using System.Drawing.Imaging;
 using System.IO;
-using System.Text;
-using System.Text.RegularExpressions;
+using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
 namespace GhostHunterLauncher
 {
-    class LauncherForm : Form
+    class LauncherForm : Form, IBackdrop
     {
         enum Mode { Busy, Install, Update, Play, Retry, Downloading }
 
-        readonly HeaderPanel header = new HeaderPanel();
-        readonly Label notesTitle = new Label();
-        readonly TextBox notesBox = new TextBox();
-        readonly Panel bottomBar = new Panel();
-        readonly Label statusLabel = new Label();
-        readonly Label versionLabel = new Label();
-        readonly SlimProgressBar progressBar = new SlimProgressBar();
-        readonly ActionButton actionButton = new ActionButton();
-        readonly LinkButton openFolderLink = new LinkButton("Open install folder");
-        readonly LinkButton repairLink = new LinkButton("Repair");
-        readonly LinkButton refreshLink = new LinkButton("Check for updates");
+        // Logical (96 DPI) window size; everything else is laid out relative to it.
+        const int BaseWidth = 1060, BaseHeight = 640, SidebarWidth = 228, TitleBarHeight = 40;
+
+        readonly Sidebar sidebar = new Sidebar();
+        readonly TitleBar titleBar = new TitleBar();
+        readonly PlayPage playPage = new PlayPage();
+        readonly NotesPage notesPage = new NotesPage();
+        readonly SettingsPage settingsPage = new SettingsPage();
+        readonly Page[] pages;
+        readonly PlayBar bar;
+        readonly FlatButton actionButton;
 
         Mode mode = Mode.Busy;
         ReleaseInfo latest;
         CancellationTokenSource downloadCts;
+        bool fixedScale; // --scale given (screenshots): ignore the monitor's DPI
 
         public LauncherForm()
         {
+            pages = new Page[] { playPage, notesPage, settingsPage };
+            bar = playPage.Bar;
+            actionButton = bar.ActionButton;
+
             SuspendLayout();
-            AutoScaleDimensions = new SizeF(96f, 96f);
-            AutoScaleMode = AutoScaleMode.Dpi;
+            AutoScaleMode = AutoScaleMode.None; // scaling is done by Ui.S()
             Text = "Who Haunts Launcher";
-            ClientSize = new Size(900, 560);
-            FormBorderStyle = FormBorderStyle.FixedSingle;
+            FormBorderStyle = FormBorderStyle.None;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
             BackColor = Theme.Background;
-            ForeColor = Theme.Ink;
-            if (Resources.Paper != null)
-            {
-                BackgroundImage = Resources.Paper;
-                BackgroundImageLayout = ImageLayout.Stretch;
-            }
-            Font = new Font("Segoe UI", 9.5f);
+            ForeColor = Theme.Text;
+            DoubleBuffered = true;
             if (Resources.AppIcon != null) Icon = Resources.AppIcon;
 
-            header.SetBounds(0, 0, 900, 120);
+            var scaleArg = ArgValue("--scale");
+            float forced;
+            if (scaleArg != null && float.TryParse(scaleArg, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out forced) && forced >= 0.5f && forced <= 4f)
+            {
+                fixedScale = true;
+                Ui.SetScale(forced);
+            }
+            else
+            {
+                using (var g = Graphics.FromHwnd(IntPtr.Zero)) ApplyDpi((int)g.DpiX, false);
+            }
 
-            notesTitle.SetBounds(32, 132, 836, 22);
-            notesTitle.Font = new Font("Georgia", 9.5f, FontStyle.Bold);
-            notesTitle.ForeColor = Theme.RedInk;
-            notesTitle.BackColor = Color.Transparent;
-            notesTitle.Text = "PATCH NOTES";
+            titleBar.MinimizeButton.Click += (s, e) => WindowState = FormWindowState.Minimized;
+            titleBar.CloseButton.Click += (s, e) => Close();
+            sidebar.SelectedChanged += ShowPage;
+            sidebar.Footer = "Launcher v" + LauncherUpdater.CurrentVersion;
 
-            var notesFrame = new Panel { BackColor = Theme.Panel, Padding = new Padding(14, 12, 6, 12) };
-            notesFrame.SetBounds(32, 158, 836, 262);
-            notesBox.Dock = DockStyle.Fill;
-            notesBox.Multiline = true;
-            notesBox.ReadOnly = true;
-            notesBox.ScrollBars = ScrollBars.Vertical;
-            notesBox.BorderStyle = BorderStyle.None;
-            notesBox.BackColor = Theme.Panel;
-            notesBox.ForeColor = Theme.Ink;
-            notesBox.Font = new Font("Georgia", 10f);
-            notesBox.TabStop = false;
-            notesFrame.Controls.Add(notesBox);
-
-            openFolderLink.Location = new Point(32, 428);
-            openFolderLink.Click += (s, e) => OpenInstallFolder();
-            repairLink.Location = new Point(170, 428);
-            repairLink.Click += async (s, e) => await RepairAsync();
-            refreshLink.Location = new Point(230, 428);
-            refreshLink.Click += async (s, e) => { if (mode != Mode.Downloading && mode != Mode.Busy) await CheckForUpdatesAsync(); };
-
-            bottomBar.SetBounds(0, 460, 900, 100);
-            bottomBar.BackColor = Theme.Bar;
-
-            statusLabel.SetBounds(32, 22, 600, 22);
-            statusLabel.Font = new Font("Georgia", 10.5f, FontStyle.Bold);
-            statusLabel.AutoEllipsis = true;
-            progressBar.SetBounds(32, 50, 600, 6);
-            progressBar.Visible = false;
-            versionLabel.SetBounds(32, 64, 600, 20);
-            versionLabel.ForeColor = Theme.Muted;
-            versionLabel.Font = new Font("Segoe UI", 8.5f);
-
-            actionButton.SetBounds(668, 24, 200, 52);
-            actionButton.Font = new Font("Georgia", 14f, FontStyle.Bold);
             actionButton.Click += async (s, e) => await OnActionAsync();
+            playPage.NotesLink.Activated += () => sidebar.Selected = 1;
+            notesPage.GitHubLink.Activated += () => Ui.OpenUrl(notesPage.GitHubLink.Tag as string);
+            settingsPage.OpenFolderButton.Click += (s, e) => OpenInstallFolder();
+            settingsPage.RepairButton.Click += async (s, e) => await RepairAsync();
+            settingsPage.CheckButton.Click += async (s, e) => { if (mode != Mode.Downloading && mode != Mode.Busy) await CheckForUpdatesAsync(); };
+            settingsPage.GameReleasesLink.Activated += () => Ui.OpenUrl(settingsPage.GameReleasesLink.Tag as string);
+            settingsPage.LauncherReleasesLink.Activated += () => Ui.OpenUrl(settingsPage.LauncherReleasesLink.Tag as string);
+            settingsPage.InstallPath = Installer.GameDir;
 
-            bottomBar.Controls.AddRange(new Control[] { statusLabel, progressBar, versionLabel, actionButton });
-            Controls.AddRange(new Control[] { header, notesTitle, notesFrame, openFolderLink, repairLink, refreshLink, bottomBar });
-            ActiveControl = actionButton; // otherwise the notes box takes focus and selects all its text
+            // Title bar first: index 0 is the top of the z-order, so it sits over the pages.
+            Controls.Add(titleBar);
+            Controls.Add(sidebar);
+            foreach (var p in pages) Controls.Add(p);
+            LayoutWindow();
+            int startPage;
+            ShowPage(int.TryParse(ArgValue("--page"), out startPage) && startPage >= 0 && startPage < pages.Length ? startPage : 0);
+            ActiveControl = actionButton;
             ResumeLayout(false);
-            PerformLayout();
+        }
+
+        protected override CreateParams CreateParams
+        {
+            get
+            {
+                var cp = base.CreateParams;
+                cp.Style |= 0x00020000 | 0x00080000; // WS_MINIMIZEBOX | WS_SYSMENU: taskbar click minimizes/restores, Alt+Space works
+                cp.ClassStyle |= 0x00020000;          // CS_DROPSHADOW
+                return cp;
+            }
+        }
+
+        protected override void OnHandleCreated(EventArgs e)
+        {
+            base.OnHandleCreated(e);
+            Native.StyleWindow(Handle);
+            if (!fixedScale)
+            {
+                var dpi = Native.WindowDpi(Handle);
+                if (dpi > 0) ApplyDpi(dpi, true);
+            }
+        }
+
+        protected override void WndProc(ref Message m)
+        {
+            if (m.Msg == Native.WM_DPICHANGED && !fixedScale)
+            {
+                // Per-monitor V2: moved to a monitor with another scale. Re-layout ourselves (WinForms on .NET Framework won't).
+                var dpi = (int)((long)m.WParam & 0xFFFF);
+                var suggested = (RECT)Marshal.PtrToStructure(m.LParam, typeof(RECT));
+                ApplyDpi(dpi, true, new Point(suggested.Left, suggested.Top));
+                m.Result = IntPtr.Zero;
+                return;
+            }
+            base.WndProc(ref m);
+        }
+
+        [StructLayout(LayoutKind.Sequential)]
+        struct RECT { public int Left, Top, Right, Bottom; }
+
+        void ApplyDpi(int dpi, bool relayout, Point? location = null)
+        {
+            var scale = Math.Max(96, dpi) / 96f;
+            // Keep the window on screen on small displays.
+            var area = location.HasValue ? Screen.FromPoint(location.Value).WorkingArea : Screen.PrimaryScreen.WorkingArea;
+            if (IsHandleCreated && !location.HasValue) area = Screen.FromHandle(Handle).WorkingArea;
+            var fit = Math.Min(area.Width * 0.96f / BaseWidth, area.Height * 0.96f / BaseHeight);
+            scale = Math.Max(0.75f, Math.Min(scale, fit));
+            if (Math.Abs(scale - Ui.Scale) < 0.001f && !location.HasValue) return;
+            Ui.SetScale(scale);
+            if (!relayout) return;
+            SuspendLayout();
+            var center = new Point(Left + Width / 2, Top + Height / 2);
+            LayoutWindow();
+            if (location.HasValue) Location = location.Value;
+            else if (Visible) Location = new Point(center.X - Width / 2, center.Y - Height / 2);
+            foreach (var p in pages) p.Rescale();
+            titleBar.PerformLayout();
+            ResumeLayout(true);
+            Invalidate(true);
+        }
+
+        void LayoutWindow()
+        {
+            ClientSize = new Size(Ui.S(BaseWidth), Ui.S(BaseHeight));
+            var side = Ui.S(SidebarWidth);
+            sidebar.SetBounds(0, 0, side, ClientSize.Height);
+            titleBar.SetBounds(side, 0, ClientSize.Width - side, Ui.S(TitleBarHeight));
+            foreach (var p in pages) p.SetBounds(side, 0, ClientSize.Width - side, ClientSize.Height);
+            titleBar.PerformLayout();
+        }
+
+        void ShowPage(int index)
+        {
+            for (var i = 0; i < pages.Length; i++) pages[i].Visible = i == index;
+            if (sidebar.Selected != index) sidebar.Selected = index;
+            titleBar.Invalidate(true);
+        }
+
+        Page CurrentPage
+        {
+            get
+            {
+                foreach (var p in pages) if (p.Visible) return p;
+                return playPage;
+            }
+        }
+
+        public void PaintBackdrop(Graphics g, Rectangle rect)
+        {
+            var page = CurrentPage;
+            var state = g.Save();
+            g.TranslateTransform(page.Left, page.Top);
+            var r = rect;
+            r.Offset(-page.Left, -page.Top);
+            page.PaintBackdrop(g, r);
+            g.Restore(state);
+        }
+
+        static string ArgValue(string name)
+        {
+            var args = Environment.GetCommandLineArgs();
+            for (var i = 1; i < args.Length - 1; i++)
+                if (string.Equals(args[i], name, StringComparison.OrdinalIgnoreCase)) return args[i + 1];
+            return null;
         }
 
         protected override async void OnShown(EventArgs e)
         {
             base.OnShown(e);
+
+            var screenshotDir = ArgValue("--screenshot");
+            if (screenshotDir != null)
+            {
+                await CaptureScreenshotsAsync(screenshotDir);
+                return;
+            }
+
             Installer.EnsureRoot();
             Installer.CleanupLeftovers();
-            versionLabel.Text = "Launcher v" + LauncherUpdater.CurrentVersion;
 
             SetMode(Mode.Busy, "Checking for launcher updates…");
             await LauncherUpdater.CleanupAsync();
-            if (await LauncherUpdater.TryUpdateAsync(status => statusLabel.Text = status))
+            if (await LauncherUpdater.TryUpdateAsync(status => bar.SetStatus(status, false)))
             {
                 Close(); // the new launcher is already starting
                 return;
@@ -127,7 +225,7 @@ namespace GhostHunterLauncher
             catch (Exception ex) { latest = null; error = "Update check failed: " + ex.Message; }
 
             var installed = Installer.InstalledTag;
-            ShowNotes(latest);
+            ShowNotes(latest, error);
             UpdateVersionLabel(installed);
 
             if (latest == null)
@@ -136,7 +234,6 @@ namespace GhostHunterLauncher
                     SetMode(Mode.Play, error != null ? "Couldn't check for updates — you can still play." : "No builds published yet.", error != null);
                 else
                     SetMode(Mode.Retry, error ?? "No builds have been published yet. Check back soon!", error != null);
-                if (error != null) { notesBox.Text = error; notesBox.Select(0, 0); }
                 return;
             }
 
@@ -145,7 +242,7 @@ namespace GhostHunterLauncher
             else if (installed != latest.Tag)
                 SetMode(Mode.Update, "Update available: " + installed + " → " + latest.Tag + " (" + FormatBytes(latest.AssetSize) + ")");
             else
-                SetMode(Mode.Play, "Up to date — ready to play.");
+                SetMode(Mode.Play, "Up to date — ready to play");
         }
 
         async Task OnActionAsync()
@@ -177,38 +274,38 @@ namespace GhostHunterLauncher
             var previousMode = mode;
             downloadCts = new CancellationTokenSource();
             SetMode(Mode.Downloading, "Starting download…");
-            progressBar.Visible = true;
-            progressBar.Value = 0;
+            SetProgress(0);
+            ShowPage(0);
 
             var download = Installer.DownloadFile;
             try
             {
                 var dlProgress = new Progress<DownloadProgress>(p =>
                 {
-                    progressBar.Value = p.Total > 0 ? (double)p.Received / p.Total : 0;
-                    var text = "Downloading " + latest.Tag + " — " + FormatBytes(p.Received) + " / " + FormatBytes(p.Total);
+                    SetProgress(p.Total > 0 ? (double)p.Received / p.Total : 0);
+                    var text = FormatBytes(p.Received) + " / " + FormatBytes(p.Total);
                     if (p.BytesPerSecond > 0)
                     {
-                        text += "  ·  " + FormatBytes((long)p.BytesPerSecond) + "/s";
-                        if (p.Total > p.Received) text += "  ·  " + FormatEta((p.Total - p.Received) / p.BytesPerSecond) + " left";
+                        text += "    ·    " + FormatBytes((long)p.BytesPerSecond) + "/s";
+                        if (p.Total > p.Received) text += "    ·    " + FormatEta((p.Total - p.Received) / p.BytesPerSecond) + " left";
                     }
-                    statusLabel.Text = text;
+                    bar.SetStatus("Downloading " + latest.Tag + "…", false);
+                    bar.Detail = text;
                 });
                 await GitHubReleases.DownloadAsync(latest, download, dlProgress, downloadCts.Token);
 
                 SetMode(Mode.Busy, "Installing " + latest.Tag + "…");
-                progressBar.Visible = true;
-                progressBar.Value = 0;
+                SetProgress(0);
                 var tag = latest.Tag;
                 var installProgress = new Progress<double>(v =>
                 {
-                    progressBar.Value = v;
-                    statusLabel.Text = "Installing " + tag + "… " + (int)(v * 100) + "%";
+                    SetProgress(v);
+                    bar.SetStatus("Installing " + tag + "…", false);
                 });
                 await Task.Run(() => Installer.Install(download, tag, installProgress));
 
                 UpdateVersionLabel(Installer.InstalledTag);
-                SetMode(Mode.Play, "Installed " + tag + " — ready to play.");
+                SetMode(Mode.Play, "Installed " + tag + " — ready to play");
             }
             catch (OperationCanceledException)
             {
@@ -238,9 +335,8 @@ namespace GhostHunterLauncher
                 SetMode(mode, "Can't repair while offline.", true);
                 return;
             }
-            var answer = MessageBox.Show(this, "Re-download and reinstall " + latest.Tag + "?\n\nYour saves and settings are kept.",
-                "Repair Who Haunts", MessageBoxButtons.OKCancel, MessageBoxIcon.Question);
-            if (answer == DialogResult.OK) await InstallAsync();
+            if (ConfirmDialog.Ask(this, "Repair Who Haunts", "Re-download and reinstall " + latest.Tag + "?\n\nYour saves and settings are kept.", "Repair", "Cancel"))
+                await InstallAsync();
         }
 
         void LaunchGame()
@@ -268,80 +364,139 @@ namespace GhostHunterLauncher
             try { Process.Start(new ProcessStartInfo("explorer.exe", "\"" + dir + "\"")); } catch { }
         }
 
+        bool installing; // Busy with a progress bar = extracting; can't be cancelled
+
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            if (mode == Mode.Downloading || (mode == Mode.Busy && progressBar.Visible))
+            if (mode == Mode.Downloading || (mode == Mode.Busy && installing))
             {
-                var answer = MessageBox.Show(this, "An install is in progress. Cancel it and quit?", "Who Haunts Launcher",
-                    MessageBoxButtons.YesNo, MessageBoxIcon.Warning);
-                if (answer != DialogResult.Yes || mode == Mode.Busy) { e.Cancel = true; return; }
+                var stop = ConfirmDialog.Ask(this, "Quit the launcher?", "An install is in progress. Cancel it and quit?", "Cancel install", "Keep going", true);
+                if (!stop || mode == Mode.Busy) { e.Cancel = true; return; }
                 if (downloadCts != null) downloadCts.Cancel();
             }
             base.OnFormClosing(e);
         }
 
+        void SetProgress(double value)
+        {
+            installing = mode == Mode.Busy;
+            bar.Progress = value;
+            sidebar.Progress = value;
+        }
+
         void SetMode(Mode newMode, string status, bool isError = false)
         {
             mode = newMode;
-            statusLabel.Text = status;
-            statusLabel.ForeColor = isError ? Theme.Error : Theme.Text;
-            progressBar.Visible = false;
+            bar.SetStatus(status, isError);
+            bar.Detail = null;
+            bar.Progress = -1;
+            sidebar.Progress = -1;
+            installing = false;
 
+            actionButton.Kind = newMode == Mode.Downloading ? ButtonKind.Secondary : ButtonKind.Primary;
             switch (newMode)
             {
-                case Mode.Busy: actionButton.Text = "PLEASE WAIT"; break;
-                case Mode.Install: actionButton.Text = "INSTALL"; break;
-                case Mode.Update: actionButton.Text = "UPDATE"; break;
-                case Mode.Play: actionButton.Text = "PLAY"; break;
-                case Mode.Retry: actionButton.Text = "RETRY"; break;
-                case Mode.Downloading: actionButton.Text = "CANCEL"; break;
+                case Mode.Busy: actionButton.Text = "PLEASE WAIT"; actionButton.Icon = null; break;
+                case Mode.Install: actionButton.Text = "INSTALL"; actionButton.Icon = Glyph.Download; break;
+                case Mode.Update: actionButton.Text = "UPDATE"; actionButton.Icon = Glyph.Download; break;
+                case Mode.Play: actionButton.Text = "PLAY"; actionButton.Icon = Glyph.Play; break;
+                case Mode.Retry: actionButton.Text = "RETRY"; actionButton.Icon = Glyph.Refresh; break;
+                case Mode.Downloading: actionButton.Text = "CANCEL"; actionButton.Icon = Glyph.Cancel; break;
             }
             actionButton.Enabled = newMode != Mode.Busy;
 
             var idle = newMode != Mode.Busy && newMode != Mode.Downloading;
-            repairLink.Visible = idle && Installer.InstalledTag != null && latest != null;
-            refreshLink.Location = new Point(repairLink.Visible ? repairLink.Right + 16 : repairLink.Left, refreshLink.Top);
-            refreshLink.Enabled = idle;
+            settingsPage.RepairButton.Enabled = idle && Installer.InstalledTag != null && latest != null;
+            settingsPage.CheckButton.Enabled = idle;
+            settingsPage.UpdatesText = newMode == Mode.Busy ? status : UpdatesSummary();
+            settingsPage.Invalidate();
+        }
+
+        string UpdatesSummary()
+        {
+            if (latest == null) return "Couldn't reach the update server.";
+            var text = "Latest build: " + latest.Tag;
+            if (latest.PublishedAt != DateTime.MinValue) text += "  ·  released " + latest.PublishedAt.ToLocalTime().ToString("MMMM d, yyyy");
+            var installed = Installer.InstalledTag;
+            if (installed != null) text += installed == latest.Tag ? "  ·  you're up to date" : "  ·  update available";
+            return text;
         }
 
         void UpdateVersionLabel(string installed)
         {
-            var text = "Installed: " + (installed ?? "none");
-            if (latest != null) text += "    Latest: " + latest.Tag;
-            text += "    Launcher v" + LauncherUpdater.CurrentVersion;
-            versionLabel.Text = text;
+            var text = "Installed " + (installed ?? "—");
+            if (latest != null) text += "    ·    Latest " + latest.Tag;
+            text += "    ·    Launcher v" + LauncherUpdater.CurrentVersion;
+            bar.Versions = text;
+            settingsPage.InstalledText = installed != null ? "Installed version: " + installed : "Not installed yet";
+            settingsPage.Invalidate();
         }
 
-        void ShowNotes(ReleaseInfo release)
+        void ShowNotes(ReleaseInfo release, string error)
         {
-            if (release == null)
-            {
-                notesTitle.Text = "PATCH NOTES";
-                notesBox.Text = "";
-                return;
-            }
-            var title = "PATCH NOTES — " + (string.IsNullOrWhiteSpace(release.Name) ? release.Tag : release.Name.ToUpperInvariant());
-            if (release.PublishedAt != DateTime.MinValue) title += "  ·  " + release.PublishedAt.ToLocalTime().ToString("MMM d, yyyy");
-            notesTitle.Text = title;
-            notesBox.Text = string.IsNullOrWhiteSpace(release.Notes) ? "No notes for this build." : CleanMarkdown(release.Notes);
-            notesBox.Select(0, 0);
+            playPage.SetRelease(release, error);
+            notesPage.SetRelease(release, error);
+            titleBar.Invalidate(true);
         }
 
-        /// <summary>Release notes are GitHub markdown; strip the syntax so they read well as plain text.</summary>
-        static string CleanMarkdown(string markdown)
+        /// <summary>
+        /// --screenshot DIR [--scale N]: renders each page to PNG and exits. Read-only: no self-update, no install,
+        /// nothing written except the PNGs. Used to review the UI without clicking through it.
+        /// </summary>
+        async Task CaptureScreenshotsAsync(string dir)
         {
-            var sb = new StringBuilder();
-            foreach (var raw in markdown.Replace("\r\n", "\n").Split('\n'))
+            try
             {
-                var line = raw.TrimEnd();
-                var heading = Regex.Match(line, @"^#{1,6}\s+(.*)$");
-                if (heading.Success) line = heading.Groups[1].Value.ToUpperInvariant();
-                line = Regex.Replace(line, @"^(\s*)[-*+]\s+", "$1•  ");
-                line = Regex.Replace(line, @"\[([^\]]+)\]\([^)]+\)", "$1");
-                line = line.Replace("**", "").Replace("__", "").Replace("`", "");
-                sb.Append(line).Append("\r\n");
+                Directory.CreateDirectory(dir);
+                await CheckForUpdatesAsync();
+               var suffix = fixedScale ? "-" + (int)Math.Round(Ui.Scale * 100) : "";
+                string[] names = { "play", "notes", "settings" };
+                for (var i = 0; i < pages.Length; i++)
+                {
+                    ShowPage(i);
+                    SaveScreenshot(this, Path.Combine(dir, names[i] + suffix + ".png"));
+                }
+                ShowPage(1);
+                notesPage.View.ScrollToEnd();
+                SaveScreenshot(this, Path.Combine(dir, "notes-end" + suffix + ".png"));
+
+                // The download state, faked for the picture only (no download is started).
+                ShowPage(0);
+                SetMode(Mode.Downloading, "Downloading v1.4.2-early-access…");
+                bar.Detail = "412.3 MB / 980.0 MB    ·    18.4 MB/s    ·    31s left";
+                SetProgress(0.42);
+                SaveScreenshot(this, Path.Combine(dir, "play-downloading" + suffix + ".png"));
+                SetMode(Mode.Retry, "Couldn't reach GitHub: The remote name could not be resolved.", true);
+                SaveScreenshot(this, Path.Combine(dir, "play-error" + suffix + ".png"));
+                SetMode(Mode.Busy, "Done"); // never leave the fake download state, or closing would ask to cancel it
+
+                using (var dialog = new ConfirmDialog("Repair Who Haunts", "Re-download and reinstall v1.4.2?\n\nYour saves and settings are kept.", "Repair", "Cancel"))
+                {
+                    dialog.StartPosition = FormStartPosition.Manual;
+                    dialog.Location = new Point(Left + (Width - dialog.Width) / 2, Top + (Height - dialog.Height) / 2);
+                    dialog.Show(this);
+                    dialog.Refresh();
+                    SaveScreenshot(dialog, Path.Combine(dir, "confirm" + suffix + ".png"));
+                    dialog.Close();
+                }
             }
-            return sb.ToString().TrimEnd();
+            catch (Exception ex)
+            {
+                try { File.WriteAllText(Path.Combine(dir, "screenshot-error.txt"), ex.ToString()); } catch { }
+            }
+            Close();
+        }
+
+        static void SaveScreenshot(Control control, string path)
+        {
+            control.Refresh();
+            Application.DoEvents();
+            // 32bppRgb: GDI text and fills leave alpha at 0, which an ARGB bitmap would treat as transparent.
+            using (var bmp = new Bitmap(control.Width, control.Height, PixelFormat.Format32bppRgb))
+            {
+                control.DrawToBitmap(bmp, new Rectangle(0, 0, bmp.Width, bmp.Height));
+                bmp.Save(path, ImageFormat.Png);
+            }
         }
 
         static bool HasRoomFor(long assetSize)
