@@ -4,19 +4,24 @@ using System.IO;
 using System.IO.Compression;
 using System.Linq;
 
-namespace GhostHunterLauncher
+namespace ExtraLifeLauncher
 {
-    /// <summary>Owns the install folder: what version is there, swapping in a new build, finding the exe.</summary>
-    static class Installer
+    /// <summary>Owns one game's install folder: what version is there, swapping in a new build, finding the exe.</summary>
+    class Installer
     {
-        public static string GameDir { get { return Path.Combine(LauncherConfig.InstallRoot, "Game"); } }
-        static string StagingDir { get { return Path.Combine(LauncherConfig.InstallRoot, "Game.new"); } }
-        static string OldDir { get { return Path.Combine(LauncherConfig.InstallRoot, "Game.old"); } }
-        static string VersionFile { get { return Path.Combine(LauncherConfig.InstallRoot, "installed-version.txt"); } }
-        public static string DownloadFile { get { return Path.Combine(LauncherConfig.InstallRoot, "download.zip.part"); } }
+        readonly GameInfo game;
+
+        public Installer(GameInfo game) { this.game = game; }
+
+        public string Root { get { return game.InstallRoot; } }
+        public string GameDir { get { return Path.Combine(Root, "Game"); } }
+        string StagingDir { get { return Path.Combine(Root, "Game.new"); } }
+        string OldDir { get { return Path.Combine(Root, "Game.old"); } }
+        string VersionFile { get { return Path.Combine(Root, "installed-version.txt"); } }
+        public string DownloadFile { get { return Path.Combine(Root, "download.zip.part"); } }
 
         /// <summary>Tag of the installed build, or null when nothing playable is installed.</summary>
-        public static string InstalledTag
+        public string InstalledTag
         {
             get
             {
@@ -26,16 +31,16 @@ namespace GhostHunterLauncher
             }
         }
 
-        public static string FindGameExe()
+        public string FindGameExe()
         {
             if (!Directory.Exists(GameDir)) return null;
-            var preferred = Path.Combine(GameDir, LauncherConfig.GameExeName);
+            var preferred = Path.Combine(GameDir, game.ExeName);
             if (File.Exists(preferred)) return preferred;
             return Directory.GetFiles(GameDir, "*.exe")
                 .FirstOrDefault(p => !Path.GetFileName(p).StartsWith("UnityCrashHandler", StringComparison.OrdinalIgnoreCase));
         }
 
-        public static bool IsGameRunning()
+        public bool IsGameRunning()
         {
             var exe = FindGameExe();
             if (exe == null) return false;
@@ -51,13 +56,13 @@ namespace GhostHunterLauncher
             return false;
         }
 
-        public static void EnsureRoot()
+        public void EnsureRoot()
         {
-            Directory.CreateDirectory(LauncherConfig.InstallRoot);
+            Directory.CreateDirectory(Root);
         }
 
         /// <summary>Extracts the zip beside the current install, then swaps it in so a failure never leaves a half-updated game.</summary>
-        public static void Install(string zipPath, string tag, IProgress<double> progress)
+        public void Install(string zipPath, string tag, IProgress<double> progress)
         {
             DeleteDir(StagingDir);
             Directory.CreateDirectory(StagingDir);
@@ -104,7 +109,7 @@ namespace GhostHunterLauncher
             DeleteDir(OldDir);
         }
 
-        public static void CleanupLeftovers()
+        public void CleanupLeftovers()
         {
             TryDelete(DownloadFile);
             DeleteDir(StagingDir);

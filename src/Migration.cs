@@ -6,25 +6,27 @@ using System.Text;
 using Microsoft.Win32;
 using Microsoft.Win32.SafeHandles;
 
-namespace GhostHunterLauncher
+namespace ExtraLifeLauncher
 {
     /// <summary>
-    /// Carries a "Ghost Hunter" install over to the "Who Haunts" name, so the rename costs players nothing: the
-    /// downloaded game moves to the new folder (no re-download), the game's saved settings and profile follow it,
-    /// and the shortcuts and Apps &amp; features entry take the new name. Every step only runs while there's
-    /// something old to carry over and nothing new in its way, so it's safe to run on every start.
+    /// Carries older installs over to today's names, so the renames cost players nothing. "Ghost Hunter" became
+    /// "Who Haunts": the downloaded game moves to the new folder (no re-download) and the game's saved settings and
+    /// profile follow it. The Who Haunts launcher then became the studio's Extra Life Launcher: the shortcuts and
+    /// the Apps &amp; features entry take the new name. Every step only runs while there's something old to carry
+    /// over and nothing new in its way, so it's safe to run on every start.
     /// </summary>
     static class Migration
     {
         const string LegacyInstallFolder = "GhostHunter";
-        const string LegacyShortcut = "Ghost Hunter.lnk";
-        const string Shortcut = "Who Haunts.lnk";
+        static readonly string[] LegacyShortcuts = { "Ghost Hunter.lnk", "Who Haunts.lnk" };
+        const string Shortcut = LauncherConfig.ProductName + ".lnk";
+        static readonly string[] LegacyDisplayNames = { "Ghost Hunter", "Who Haunts" };
 
         // Unity keeps PlayerPrefs under HKCU\Software\<Company Name>\<Product Name>.
         const string LegacyPrefsKey = @"Software\DefaultCompany\Ghost Hunter";
         const string PrefsKey = @"Software\DefaultCompany\Who Haunts";
 
-        // Inno Setup's per-user uninstall entry (AppId in installer/GhostHunterLauncher.iss, plus "_is1").
+        // Inno Setup's per-user uninstall entry (AppId in installer/ExtraLifeLauncher.iss, plus "_is1").
         const string UninstallKey = @"Software\Microsoft\Windows\CurrentVersion\Uninstall\{6F3B2C1E-8D4A-4E7B-9C5F-2A1D0E8B7F43}_is1";
 
         public static void Run()
@@ -37,9 +39,10 @@ namespace GhostHunterLauncher
 
         static void MoveInstall()
         {
-            var legacy = Path.Combine(Path.GetDirectoryName(LauncherConfig.InstallRoot), LegacyInstallFolder);
-            if (Directory.Exists(legacy) && !Directory.Exists(LauncherConfig.InstallRoot))
-                Directory.Move(legacy, LauncherConfig.InstallRoot);
+            var root = LauncherConfig.Games[0].InstallRoot; // Who Haunts
+            var legacy = Path.Combine(Path.GetDirectoryName(root), LegacyInstallFolder);
+            if (Directory.Exists(legacy) && !Directory.Exists(root))
+                Directory.Move(legacy, root);
         }
 
         static void CopyGamePrefs()
@@ -99,9 +102,14 @@ namespace GhostHunterLauncher
             foreach (var folder in new[] { Environment.SpecialFolder.Programs, Environment.SpecialFolder.DesktopDirectory })
             {
                 var dir = Environment.GetFolderPath(folder);
-                var legacy = Path.Combine(dir, LegacyShortcut);
                 var renamed = Path.Combine(dir, Shortcut);
-                if (File.Exists(legacy) && !File.Exists(renamed)) File.Move(legacy, renamed);
+                foreach (var name in LegacyShortcuts)
+                {
+                    var legacy = Path.Combine(dir, name);
+                    if (!File.Exists(legacy)) continue;
+                    if (File.Exists(renamed)) File.Delete(legacy); // setup already made the new one
+                    else File.Move(legacy, renamed);
+                }
             }
         }
 
@@ -110,8 +118,8 @@ namespace GhostHunterLauncher
             using (var key = Registry.CurrentUser.OpenSubKey(UninstallKey, true))
             {
                 if (key == null) return;
-                if ((key.GetValue("DisplayName") as string) == "Ghost Hunter") key.SetValue("DisplayName", "Who Haunts");
-                if ((key.GetValue("Publisher") as string) == "Ghost Hunter") key.SetValue("Publisher", "Who Haunts");
+                if (Array.IndexOf(LegacyDisplayNames, key.GetValue("DisplayName") as string) >= 0) key.SetValue("DisplayName", LauncherConfig.ProductName);
+                if (Array.IndexOf(LegacyDisplayNames, key.GetValue("Publisher") as string) >= 0) key.SetValue("Publisher", LauncherConfig.StudioName);
             }
         }
 

@@ -1,45 +1,51 @@
 using System;
+using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
-using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace GhostHunterLauncher
+namespace ExtraLifeLauncher
 {
     class LauncherForm : Form, IBackdrop
     {
-        enum Mode { Busy, Install, Update, Play, Retry, Downloading }
-
         // Logical (96 DPI) window size; everything else is laid out relative to it.
         const int BaseWidth = 1060, BaseHeight = 640, SidebarWidth = 228, TitleBarHeight = 40;
 
-        readonly Sidebar sidebar = new Sidebar();
+        readonly GameSession[] sessions;
+        readonly Sidebar sidebar;
         readonly TitleBar titleBar = new TitleBar();
-        readonly PlayPage playPage = new PlayPage();
-        readonly NotesPage notesPage = new NotesPage();
-        readonly SettingsPage settingsPage = new SettingsPage();
+        readonly HomePage homePage;
+        readonly GamePage[] gamePages;
+        readonly NotesPage[] notesPages;
+        readonly SettingsPage settingsPage;
         readonly Page[] pages;
-        readonly PlayBar bar;
-        readonly FlatButton actionButton;
+        readonly int[] gameTab; // 0 = overview, 1 = patch notes, remembered per game
 
-        Mode mode = Mode.Busy;
-        ReleaseInfo latest;
-        CancellationTokenSource downloadCts;
         bool fixedScale; // --scale given (screenshots): ignore the monitor's DPI
 
         public LauncherForm()
         {
-            pages = new Page[] { playPage, notesPage, settingsPage };
-            bar = playPage.Bar;
-            actionButton = bar.ActionButton;
+            sessions = LauncherConfig.Games.Select(g => new GameSession(g)).ToArray();
+            sidebar = new Sidebar(sessions);
+            homePage = new HomePage(sessions);
+            gamePages = sessions.Select(s => new GamePage(s)).ToArray();
+            notesPages = sessions.Select(s => new NotesPage(s)).ToArray();
+            settingsPage = new SettingsPage(sessions);
+            gameTab = new int[sessions.Length];
+            var all = new List<Page> { homePage };
+            all.AddRange(gamePages);
+            all.AddRange(notesPages);
+            all.Add(settingsPage);
+            pages = all.ToArray();
 
             SuspendLayout();
             AutoScaleMode = AutoScaleMode.None; // scaling is done by Ui.S()
-            Text = "Who Haunts Launcher";
+            Text = LauncherConfig.ProductName;
             FormBorderStyle = FormBorderStyle.None;
             MaximizeBox = false;
             StartPosition = FormStartPosition.CenterScreen;
@@ -64,16 +70,27 @@ namespace GhostHunterLauncher
             titleBar.CloseButton.Click += (s, e) => Close();
             sidebar.SelectedChanged += ShowPage;
             sidebar.Footer = "Launcher v" + LauncherUpdater.CurrentVersion;
+            homePage.OpenGame += i => sidebar.Selected = i + 1;
 
-            actionButton.Click += async (s, e) => await OnActionAsync();
-            playPage.NotesLink.Activated += () => sidebar.Selected = 1;
-            notesPage.GitHubLink.Activated += () => Ui.OpenUrl(notesPage.GitHubLink.Tag as string);
-            settingsPage.OpenFolderButton.Click += (s, e) => OpenInstallFolder();
-            settingsPage.RepairButton.Click += async (s, e) => await RepairAsync();
-            settingsPage.CheckButton.Click += async (s, e) => { if (mode != Mode.Downloading && mode != Mode.Busy) await CheckForUpdatesAsync(); };
-            settingsPage.GameReleasesLink.Activated += () => Ui.OpenUrl(settingsPage.GameReleasesLink.Tag as string);
-            settingsPage.LauncherReleasesLink.Activated += () => Ui.OpenUrl(settingsPage.LauncherReleasesLink.Tag as string);
-            settingsPage.InstallPath = Installer.GameDir;
+            for (var i = 0; i < sessions.Length; i++)
+            {
+                var index = i;
+                var session = sessions[i];
+                homePage.Buttons[i].Click += async (s, e) => await ActAsync(session);
+                gamePages[i].Bar.ActionButton.Click += async (s, e) => await ActAsync(session);
+                gamePages[i].NotesLink.Activated += () => ShowGame(index, 1);
+                gamePages[i].Tabs.SelectedChanged += tab => ShowGame(index, tab);
+                notesPages[i].Tabs.SelectedChanged += tab => ShowGame(index, tab);
+                notesPages[i].GitHubLink.Activated += () => Ui.OpenUrl(notesPages[index].GitHubLink.Tag as string);
+                settingsPage.FolderButtons[i].Click += (s, e) => OpenInstallFolder(session);
+                settingsPage.RepairButtons[i].Click += async (s, e) => await RepairAsync(index);
+            }
+            settingsPage.CheckButton.Click += async (s, e) => await CheckAllAsync();
+            foreach (var link in settingsPage.ReleaseLinks.Concat(new[] { settingsPage.LauncherReleasesLink }))
+            {
+                var l = link;
+                l.Activated += () => Ui.OpenUrl(l.Tag as string);
+            }
 
             // Title bar first: index 0 is the top of the z-order, so it sits over the pages.
             Controls.Add(titleBar);
@@ -81,8 +98,7 @@ namespace GhostHunterLauncher
             foreach (var p in pages) Controls.Add(p);
             LayoutWindow();
             int startPage;
-            ShowPage(int.TryParse(ArgValue("--page"), out startPage) && startPage >= 0 && startPage < pages.Length ? startPage : 0);
-            ActiveControl = actionButton;
+            ShowPage(int.TryParse(ArgValue("--page"), out startPage) && startPage >= 0 && startPage <= sidebar.SettingsIndex ? startPage : 0);
             ResumeLayout(false);
         }
 
@@ -157,11 +173,24 @@ namespace GhostHunterLauncher
             titleBar.PerformLayout();
         }
 
+        /// <summary>Shows the page for a sidebar item (0 = Home, 1..N = games, N+1 = Settings).</summary>
         void ShowPage(int index)
         {
-            for (var i = 0; i < pages.Length; i++) pages[i].Visible = i == index;
+            Page target = settingsPage;
+            if (index == 0) target = homePage;
+            else if (index <= sessions.Length) target = gameTab[index - 1] == 1 ? (Page)notesPages[index - 1] : gamePages[index - 1];
+            foreach (var p in pages) p.Visible = p == target;
             if (sidebar.Selected != index) sidebar.Selected = index;
             titleBar.Invalidate(true);
+        }
+
+        void ShowGame(int game, int tab)
+        {
+            gameTab[game] = tab;
+            gamePages[game].Tabs.Selected = 0;
+            notesPages[game].Tabs.Selected = 1;
+            if (sidebar.Selected == game + 1) ShowPage(game + 1);
+            else sidebar.Selected = game + 1;
         }
 
         Page CurrentPage
@@ -169,7 +198,7 @@ namespace GhostHunterLauncher
             get
             {
                 foreach (var p in pages) if (p.Visible) return p;
-                return playPage;
+                return homePage;
             }
         }
 
@@ -203,240 +232,69 @@ namespace GhostHunterLauncher
                 return;
             }
 
-            Installer.EnsureRoot();
-            Installer.CleanupLeftovers();
+            foreach (var s in sessions) s.PrepareFolder();
 
-            SetMode(Mode.Busy, "Checking for launcher updates…");
+            foreach (var s in sessions) if (s.Game.IsPublished) s.SetBusy("Checking for launcher updates…");
             await LauncherUpdater.CleanupAsync();
-            if (await LauncherUpdater.TryUpdateAsync(status => bar.SetStatus(status, false)))
+            if (await LauncherUpdater.TryUpdateAsync(status => { foreach (var s in sessions) if (s.Game.IsPublished) s.SetBusy(status); }))
             {
                 Close(); // the new launcher is already starting
                 return;
             }
-            await CheckForUpdatesAsync();
+            await CheckAllAsync();
         }
 
-        async Task CheckForUpdatesAsync()
+        Task CheckAllAsync()
         {
-            SetMode(Mode.Busy, "Checking for updates…");
-            string error = null;
-            try { latest = await GitHubReleases.GetLatestGameAsync(); }
-            catch (LauncherException ex) { latest = null; error = ex.Message; }
-            catch (Exception ex) { latest = null; error = "Update check failed: " + ex.Message; }
+            return Task.WhenAll(sessions.Where(s => s.IsIdle || !s.Checked).Select(s => s.CheckForUpdatesAsync()));
+        }
 
-            var installed = Installer.InstalledTag;
-            ShowNotes(latest, error);
-            UpdateVersionLabel(installed);
+        async Task ActAsync(GameSession session)
+        {
+            if (session.Mode == Mode.Install || session.Mode == Mode.Update) ShowGame(Array.IndexOf(sessions, session), 0);
+            if (!await session.ActAsync()) return;
+            // The game is starting. Get out of the way, but don't cut off another game's download.
+            if (sessions.Any(s => s.IsWorking)) WindowState = FormWindowState.Minimized;
+            else Close();
+        }
 
-            if (latest == null)
+        async Task RepairAsync(int index)
+        {
+            var session = sessions[index];
+            if (!session.IsIdle) return;
+            if (session.Latest == null)
             {
-                if (installed != null)
-                    SetMode(Mode.Play, error != null ? "Couldn't check for updates — you can still play." : "No builds published yet.", error != null);
-                else
-                    SetMode(Mode.Retry, error ?? "No builds have been published yet. Check back soon!", error != null);
+                session.ShowError("Can't repair while offline.");
                 return;
             }
-
-            if (installed == null)
-                SetMode(Mode.Install, "Ready to install " + latest.Tag + " (" + FormatBytes(latest.AssetSize) + ")");
-            else if (installed != latest.Tag)
-                SetMode(Mode.Update, "Update available: " + installed + " → " + latest.Tag + " (" + FormatBytes(latest.AssetSize) + ")");
-            else
-                SetMode(Mode.Play, "Up to date — ready to play");
-        }
-
-        async Task OnActionAsync()
-        {
-            switch (mode)
+            if (ConfirmDialog.Ask(this, "Repair " + session.Game.Name, "Re-download and reinstall " + session.Latest.Tag + "?\n\nYour saves and settings are kept.", "Repair", "Cancel"))
             {
-                case Mode.Install:
-                case Mode.Update: await InstallAsync(); break;
-                case Mode.Play: LaunchGame(); break;
-                case Mode.Retry: await CheckForUpdatesAsync(); break;
-                case Mode.Downloading: if (downloadCts != null) downloadCts.Cancel(); break;
+                ShowGame(index, 0);
+                await session.InstallAsync();
             }
         }
 
-        async Task InstallAsync()
+        static void OpenInstallFolder(GameSession session)
         {
-            if (latest == null) return;
-            if (Installer.IsGameRunning())
+            var dir = session.Installer.GameDir;
+            if (!Directory.Exists(dir))
             {
-                SetMode(mode, "Close Who Haunts before updating.", true);
-                return;
+                dir = session.Installer.Root;
+                try { Directory.CreateDirectory(dir); } catch { return; }
             }
-            if (!HasRoomFor(latest.AssetSize))
-            {
-                SetMode(mode, "Not enough disk space (need about " + FormatBytes(latest.AssetSize * 3) + " free).", true);
-                return;
-            }
-
-            var previousMode = mode;
-            downloadCts = new CancellationTokenSource();
-            SetMode(Mode.Downloading, "Starting download…");
-            SetProgress(0);
-            ShowPage(0);
-
-            var download = Installer.DownloadFile;
-            try
-            {
-                var dlProgress = new Progress<DownloadProgress>(p =>
-                {
-                    SetProgress(p.Total > 0 ? (double)p.Received / p.Total : 0);
-                    var text = FormatBytes(p.Received) + " / " + FormatBytes(p.Total);
-                    if (p.BytesPerSecond > 0)
-                    {
-                        text += "    ·    " + FormatBytes((long)p.BytesPerSecond) + "/s";
-                        if (p.Total > p.Received) text += "    ·    " + FormatEta((p.Total - p.Received) / p.BytesPerSecond) + " left";
-                    }
-                    bar.SetStatus("Downloading " + latest.Tag + "…", false);
-                    bar.Detail = text;
-                });
-                await GitHubReleases.DownloadAsync(latest, download, dlProgress, downloadCts.Token);
-
-                SetMode(Mode.Busy, "Installing " + latest.Tag + "…");
-                SetProgress(0);
-                var tag = latest.Tag;
-                var installProgress = new Progress<double>(v =>
-                {
-                    SetProgress(v);
-                    bar.SetStatus("Installing " + tag + "…", false);
-                });
-                await Task.Run(() => Installer.Install(download, tag, installProgress));
-
-                UpdateVersionLabel(Installer.InstalledTag);
-                SetMode(Mode.Play, "Installed " + tag + " — ready to play");
-            }
-            catch (OperationCanceledException)
-            {
-                SetMode(previousMode, "Download cancelled.");
-            }
-            catch (LauncherException ex)
-            {
-                SetMode(previousMode, ex.Message, true);
-            }
-            catch (Exception ex)
-            {
-                SetMode(previousMode, "Install failed: " + ex.Message, true);
-            }
-            finally
-            {
-                Installer.TryDelete(download);
-                downloadCts.Dispose();
-                downloadCts = null;
-            }
-        }
-
-        async Task RepairAsync()
-        {
-            if (mode == Mode.Busy || mode == Mode.Downloading) return;
-            if (latest == null)
-            {
-                SetMode(mode, "Can't repair while offline.", true);
-                return;
-            }
-            if (ConfirmDialog.Ask(this, "Repair Who Haunts", "Re-download and reinstall " + latest.Tag + "?\n\nYour saves and settings are kept.", "Repair", "Cancel"))
-                await InstallAsync();
-        }
-
-        void LaunchGame()
-        {
-            var exe = Installer.FindGameExe();
-            if (exe == null)
-            {
-                SetMode(latest != null ? Mode.Install : Mode.Retry, "The game files are missing. Please reinstall.", true);
-                return;
-            }
-            try
-            {
-                Process.Start(new ProcessStartInfo(exe) { WorkingDirectory = Path.GetDirectoryName(exe), UseShellExecute = true });
-                Close();
-            }
-            catch (Exception ex)
-            {
-                SetMode(Mode.Play, "Couldn't start the game: " + ex.Message, true);
-            }
-        }
-
-        void OpenInstallFolder()
-        {
-            var dir = Directory.Exists(Installer.GameDir) ? Installer.GameDir : LauncherConfig.InstallRoot;
             try { Process.Start(new ProcessStartInfo("explorer.exe", "\"" + dir + "\"")); } catch { }
         }
 
-        bool installing; // Busy with a progress bar = extracting; can't be cancelled
-
         protected override void OnFormClosing(FormClosingEventArgs e)
         {
-            if (mode == Mode.Downloading || (mode == Mode.Busy && installing))
+            if (sessions.Any(s => s.IsWorking))
             {
                 var stop = ConfirmDialog.Ask(this, "Quit the launcher?", "An install is in progress. Cancel it and quit?", "Cancel install", "Keep going", true);
-                if (!stop || mode == Mode.Busy) { e.Cancel = true; return; }
-                if (downloadCts != null) downloadCts.Cancel();
+                // Extracting can't be stopped halfway; only downloads cancel.
+                if (!stop || sessions.Any(s => s.IsExtracting)) { e.Cancel = true; return; }
+                foreach (var s in sessions) s.CancelDownload();
             }
             base.OnFormClosing(e);
-        }
-
-        void SetProgress(double value)
-        {
-            installing = mode == Mode.Busy;
-            bar.Progress = value;
-            sidebar.Progress = value;
-        }
-
-        void SetMode(Mode newMode, string status, bool isError = false)
-        {
-            mode = newMode;
-            bar.SetStatus(status, isError);
-            bar.Detail = null;
-            bar.Progress = -1;
-            sidebar.Progress = -1;
-            installing = false;
-
-            actionButton.Kind = newMode == Mode.Downloading ? ButtonKind.Secondary : ButtonKind.Primary;
-            switch (newMode)
-            {
-                case Mode.Busy: actionButton.Text = "PLEASE WAIT"; actionButton.Icon = null; break;
-                case Mode.Install: actionButton.Text = "INSTALL"; actionButton.Icon = Glyph.Download; break;
-                case Mode.Update: actionButton.Text = "UPDATE"; actionButton.Icon = Glyph.Download; break;
-                case Mode.Play: actionButton.Text = "PLAY"; actionButton.Icon = Glyph.Play; break;
-                case Mode.Retry: actionButton.Text = "RETRY"; actionButton.Icon = Glyph.Refresh; break;
-                case Mode.Downloading: actionButton.Text = "CANCEL"; actionButton.Icon = Glyph.Cancel; break;
-            }
-            actionButton.Enabled = newMode != Mode.Busy;
-
-            var idle = newMode != Mode.Busy && newMode != Mode.Downloading;
-            settingsPage.RepairButton.Enabled = idle && Installer.InstalledTag != null && latest != null;
-            settingsPage.CheckButton.Enabled = idle;
-            settingsPage.UpdatesText = newMode == Mode.Busy ? status : UpdatesSummary();
-            settingsPage.Invalidate();
-        }
-
-        string UpdatesSummary()
-        {
-            if (latest == null) return "Couldn't reach the update server.";
-            var text = "Latest build: " + latest.Tag;
-            if (latest.PublishedAt != DateTime.MinValue) text += "  ·  released " + latest.PublishedAt.ToLocalTime().ToString("MMMM d, yyyy");
-            var installed = Installer.InstalledTag;
-            if (installed != null) text += installed == latest.Tag ? "  ·  you're up to date" : "  ·  update available";
-            return text;
-        }
-
-        void UpdateVersionLabel(string installed)
-        {
-            var text = "Installed " + (installed ?? "—");
-            if (latest != null) text += "    ·    Latest " + latest.Tag;
-            text += "    ·    Launcher v" + LauncherUpdater.CurrentVersion;
-            bar.Versions = text;
-            settingsPage.InstalledText = installed != null ? "Installed version: " + installed : "Not installed yet";
-            settingsPage.Invalidate();
-        }
-
-        void ShowNotes(ReleaseInfo release, string error)
-        {
-            playPage.SetRelease(release, error);
-            notesPage.SetRelease(release, error);
-            titleBar.Invalidate(true);
         }
 
         /// <summary>
@@ -448,35 +306,45 @@ namespace GhostHunterLauncher
             try
             {
                 Directory.CreateDirectory(dir);
-                await CheckForUpdatesAsync();
-               var suffix = fixedScale ? "-" + (int)Math.Round(Ui.Scale * 100) : "";
-                string[] names = { "play", "notes", "settings" };
-                for (var i = 0; i < pages.Length; i++)
+                await CheckAllAsync();
+                var suffix = fixedScale ? "-" + (int)Math.Round(Ui.Scale * 100) : "";
+                Func<string, string> file = name => Path.Combine(dir, name + suffix + ".png");
+
+                ShowPage(0);
+                SaveScreenshot(this, file("home"));
+                for (var i = 0; i < sessions.Length; i++)
                 {
-                    ShowPage(i);
-                    SaveScreenshot(this, Path.Combine(dir, names[i] + suffix + ".png"));
+                    var id = sessions[i].Game.Id;
+                    ShowGame(i, 0);
+                    SaveScreenshot(this, file(id));
+                    ShowGame(i, 1);
+                    SaveScreenshot(this, file(id + "-notes"));
+                    notesPages[i].View.ScrollToEnd();
+                    SaveScreenshot(this, file(id + "-notes-end"));
+                    ShowGame(i, 0);
                 }
-                ShowPage(1);
-                notesPage.View.ScrollToEnd();
-                SaveScreenshot(this, Path.Combine(dir, "notes-end" + suffix + ".png"));
+                ShowPage(sidebar.SettingsIndex);
+                SaveScreenshot(this, file("settings"));
 
                 // The download state, faked for the picture only (no download is started).
+                var first = sessions[0];
+                first.Fake(Mode.Downloading, "Downloading v1.4.2-early-access…", false, 0.42, "412.3 MB / 980.0 MB    ·    18.4 MB/s    ·    31s left");
+                ShowGame(0, 0);
+                SaveScreenshot(this, file(first.Game.Id + "-downloading"));
                 ShowPage(0);
-                SetMode(Mode.Downloading, "Downloading v1.4.2-early-access…");
-                bar.Detail = "412.3 MB / 980.0 MB    ·    18.4 MB/s    ·    31s left";
-                SetProgress(0.42);
-                SaveScreenshot(this, Path.Combine(dir, "play-downloading" + suffix + ".png"));
-                SetMode(Mode.Retry, "Couldn't reach GitHub: The remote name could not be resolved.", true);
-                SaveScreenshot(this, Path.Combine(dir, "play-error" + suffix + ".png"));
-                SetMode(Mode.Busy, "Done"); // never leave the fake download state, or closing would ask to cancel it
+                SaveScreenshot(this, file("home-downloading"));
+                first.Fake(Mode.Retry, "Couldn't reach GitHub: The remote name could not be resolved.", true);
+                ShowGame(0, 0);
+                SaveScreenshot(this, file(first.Game.Id + "-error"));
+                first.Fake(Mode.Busy, "Done", false); // never leave the fake download state, or closing would ask to cancel it
 
-                using (var dialog = new ConfirmDialog("Repair Who Haunts", "Re-download and reinstall v1.4.2?\n\nYour saves and settings are kept.", "Repair", "Cancel"))
+                using (var dialog = new ConfirmDialog("Repair " + first.Game.Name, "Re-download and reinstall v1.4.2?\n\nYour saves and settings are kept.", "Repair", "Cancel"))
                 {
                     dialog.StartPosition = FormStartPosition.Manual;
                     dialog.Location = new Point(Left + (Width - dialog.Width) / 2, Top + (Height - dialog.Height) / 2);
                     dialog.Show(this);
                     dialog.Refresh();
-                    SaveScreenshot(dialog, Path.Combine(dir, "confirm" + suffix + ".png"));
+                    SaveScreenshot(dialog, file("confirm"));
                     dialog.Close();
                 }
             }
@@ -497,31 +365,6 @@ namespace GhostHunterLauncher
                 control.DrawToBitmap(bmp, new Rectangle(0, 0, bmp.Width, bmp.Height));
                 bmp.Save(path, ImageFormat.Png);
             }
-        }
-
-        static bool HasRoomFor(long assetSize)
-        {
-            try
-            {
-                var drive = new DriveInfo(Path.GetPathRoot(LauncherConfig.InstallRoot));
-                return drive.AvailableFreeSpace > assetSize * 3; // zip + extracted copy + headroom
-            }
-            catch { return true; }
-        }
-
-        static string FormatBytes(long bytes)
-        {
-            if (bytes <= 0) return "0 MB";
-            if (bytes >= 1L << 30) return (bytes / (double)(1L << 30)).ToString("0.00") + " GB";
-            return (bytes / (double)(1L << 20)).ToString("0.0") + " MB";
-        }
-
-        static string FormatEta(double seconds)
-        {
-            var t = TimeSpan.FromSeconds(Math.Max(1, seconds));
-            if (t.TotalHours >= 1) return (int)t.TotalHours + "h " + t.Minutes + "m";
-            if (t.TotalMinutes >= 1) return (int)t.TotalMinutes + "m " + t.Seconds + "s";
-            return t.Seconds + "s";
         }
     }
 }

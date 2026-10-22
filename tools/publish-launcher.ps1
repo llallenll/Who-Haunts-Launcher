@@ -31,21 +31,24 @@ $ErrorActionPreference = 'Stop'
 if ($exists) { throw "$tag is already published. Bump AssemblyVersion in src\AssemblyInfo.cs first." }
 
 & (Join-Path $root 'build.ps1')
-$exe = Join-Path $root 'bin\WhoHauntsLauncher.exe'
-$setup = Join-Path $root 'bin\WhoHauntsLauncherSetup.exe'
+$exe = Join-Path $root 'bin\ExtraLifeLauncher.exe'
+$setup = Join-Path $root 'bin\ExtraLifeLauncherSetup.exe'
 if (-not (Test-Path $setup)) { throw "Installer wasn't built. Install Inno Setup: winget install JRSoftware.InnoSetup" }
 
-# Launchers from before the rename update themselves from GhostHunterLauncher.exe, and older links point at
-# GhostHunterLauncherSetup.exe, so every release also carries copies under those names.
+# Older launchers update themselves from GhostHunterLauncher.exe (Ghost Hunter) or WhoHauntsLauncher.exe (Who Haunts),
+# and older links point at those setups, so every release also carries copies under those names.
 $legacy = Join-Path $root 'bin\legacy'
 New-Item -ItemType Directory -Force $legacy | Out-Null
-$legacyExe = Join-Path $legacy 'GhostHunterLauncher.exe'
-$legacySetup = Join-Path $legacy 'GhostHunterLauncherSetup.exe'
-Copy-Item $exe $legacyExe -Force
-Copy-Item $setup $legacySetup -Force
+$legacyFiles = foreach ($name in 'GhostHunterLauncher', 'WhoHauntsLauncher') {
+    $legacyExe = Join-Path $legacy "$name.exe"
+    $legacySetup = Join-Path $legacy "${name}Setup.exe"
+    Copy-Item $exe $legacyExe -Force
+    Copy-Item $setup $legacySetup -Force
+    $legacyExe, $legacySetup
+}
 
-if (-not $Notes) { $Notes = "Who Haunts Launcher $tag" }
+if (-not $Notes) { $Notes = "Extra Life Launcher $tag" }
 Write-Host "Publishing launcher $tag to $Repo..."
-& $gh release create $tag $exe $setup $legacyExe $legacySetup --repo $Repo --title "Launcher $tag" --notes $Notes --target main
+& $gh release create $tag $exe $setup @legacyFiles --repo $Repo --title "Launcher $tag" --notes $Notes --target main
 if ($LASTEXITCODE -ne 0) { throw "gh release create failed." }
-Write-Host "Done. Installer link: https://github.com/$Repo/releases/latest/download/WhoHauntsLauncherSetup.exe"
+Write-Host "Done. Installer link: https://github.com/$Repo/releases/latest/download/ExtraLifeLauncherSetup.exe"

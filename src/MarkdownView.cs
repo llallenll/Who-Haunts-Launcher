@@ -7,7 +7,7 @@ using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows.Forms;
 
-namespace GhostHunterLauncher
+namespace ExtraLifeLauncher
 {
     enum MdKind { Heading, Paragraph, Bullet, Numbered, Quote, Code, Rule }
 

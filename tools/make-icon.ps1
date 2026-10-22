@@ -1,8 +1,8 @@
-# Scales the Who Haunts icon in assets\logo-source.png (a square PNG, already cut out on transparency) and writes
-#   assets\logo.png  - 256px transparent logo shown in the launcher window
-#   assets\icon.ico  - multi-size exe/installer icon
-# Rerun after replacing logo-source.png.
-param([string] $Source = (Join-Path $PSScriptRoot '..\assets\logo-source.png'))
+# Scales the Extra Life Interactive mark in assets\studio\mark-source.png (a square PNG with transparent corners) and writes
+#   assets\studio\mark.png - 256px mark shown in the launcher's sidebar
+#   assets\icon.ico         - multi-size exe/installer icon
+# Rerun after replacing mark-source.png.
+param([string] $Source = (Join-Path $PSScriptRoot '..\assets\studio\mark-source.png'))
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 $assets = Join-Path $PSScriptRoot '..\assets'
@@ -45,7 +45,7 @@ function Get-DibBytes($bmp) {
 }
 
 $logo = New-Logo 256
-$logo.Save((Join-Path $assets 'logo.png'), [Drawing.Imaging.ImageFormat]::Png)
+$logo.Save((Join-Path $assets 'studio\mark.png'), [Drawing.Imaging.ImageFormat]::Png)
 
 $sizes = 16, 20, 24, 32, 40, 48, 64, 96, 128, 256
 $images = New-Object 'System.Collections.Generic.List[byte[]]'
@@ -68,4 +68,4 @@ foreach ($img in $images) { $w.Write($img) }
 $w.Flush()
 [IO.File]::WriteAllBytes((Join-Path $assets 'icon.ico'), $ico.ToArray())
 $src.Dispose()
-Write-Host "Wrote assets\logo.png and assets\icon.ico"
+Write-Host "Wrote assets\studio\mark.png and assets\icon.ico"

@@ -6,7 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Forms;
 
-namespace GhostHunterLauncher
+namespace ExtraLifeLauncher
 {
     /// <summary>
     /// Replaces the running launcher exe with a newer release. Windows lets a running exe be renamed but not

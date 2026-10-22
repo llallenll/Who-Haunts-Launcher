@@ -8,7 +8,7 @@ using System.Drawing.Text;
 using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
-namespace GhostHunterLauncher
+namespace ExtraLifeLauncher
 {
     static class Theme
     {
@@ -67,6 +67,17 @@ namespace GhostHunterLauncher
         }
 
         public static Color Alpha(Color c, int alpha) { return Color.FromArgb(Math.Max(0, Math.Min(255, alpha)), c); }
+
+        // Button states for a game's own accent; the studio red keeps its hand-picked shades.
+        public static Color Hover(Color accent) { return accent.ToArgb() == Accent.ToArgb() ? AccentHover : Lerp(accent, Color.White, 0.12f); }
+        public static Color Pressed(Color accent) { return accent.ToArgb() == Accent.ToArgb() ? AccentPressed : Lerp(accent, Color.Black, 0.2f); }
+
+        /// <summary>Text colour that reads on a filled accent: dark on light accents (amber), light on dark ones (red).</summary>
+        public static Color OnAccent(Color accent)
+        {
+            var luma = accent.R * 0.299 + accent.G * 0.587 + accent.B * 0.114;
+            return luma > 140 ? Color.FromArgb(28, 20, 12) : AccentText;
+        }
     }
 
     enum Face { Text, TextSemibold, Display, DisplaySemibold, Mono, Icon }
@@ -188,6 +199,8 @@ namespace GhostHunterLauncher
         public const string External = "";
         public const string Forward = "";
         public const string Warning = "";
+        public const string Home = "";
+        public const string Clock = "";
     }
 
     static class Native
@@ -328,6 +341,7 @@ namespace GhostHunterLauncher
         public float FontPx = 13.5f;
         public float Radius = 6f;
         public Face TextFace = Face.TextSemibold;
+        public Color Accent = Theme.Accent; // primary fill; each game brings its own
 
         public FlatButton(string text, ButtonKind kind, string icon = null)
         {
@@ -363,8 +377,8 @@ namespace GhostHunterLauncher
             }
             else if (kind == ButtonKind.Primary)
             {
-                fill = pressed ? Theme.AccentPressed : Theme.Lerp(Theme.Accent, Theme.AccentHover, hoverT);
-                text = Theme.AccentText;
+                fill = pressed ? Theme.Pressed(Accent) : Theme.Lerp(Accent, Theme.Hover(Accent), hoverT);
+                text = Theme.OnAccent(Accent);
             }
             else if (kind == ButtonKind.Secondary)
             {
@@ -514,20 +528,20 @@ namespace GhostHunterLauncher
     /// <summary>Images compiled into the exe by build.ps1 (/resource).</summary>
     static class Resources
     {
-        public static readonly Image FullLogo = LoadImage("GhostHunterLauncher.logo-full.png");
-        public static readonly Image HexLogo = LoadImage("GhostHunterLauncher.logo.png");
-        public static readonly Image Paper = LoadImage("GhostHunterLauncher.paper.png");
-        public static readonly Icon AppIcon = LoadIcon("GhostHunterLauncher.icon.ico");
+        const string Prefix = "ExtraLifeLauncher.";
+        public static readonly Image StudioMark = Load("studio.mark.png");
+        public static readonly Icon AppIcon = LoadIcon("icon.ico");
 
-        static Image LoadImage(string name)
+        /// <summary>An image embedded as "ExtraLifeLauncher.&lt;name&gt;", or null when the build left it out.</summary>
+        public static Image Load(string name)
         {
-            var stream = typeof(Resources).Assembly.GetManifestResourceStream(name);
+            var stream = typeof(Resources).Assembly.GetManifestResourceStream(Prefix + name);
             return stream == null ? null : Image.FromStream(stream);
         }
 
         static Icon LoadIcon(string name)
         {
-            using (var stream = typeof(Resources).Assembly.GetManifestResourceStream(name))
+            using (var stream = typeof(Resources).Assembly.GetManifestResourceStream(Prefix + name))
                 return stream == null ? null : new Icon(stream);
         }
 

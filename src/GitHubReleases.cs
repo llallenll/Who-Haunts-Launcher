@@ -8,7 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Web.Script.Serialization;
 
-namespace GhostHunterLauncher
+namespace ExtraLifeLauncher
 {
     class ReleaseInfo
     {
@@ -45,14 +45,13 @@ namespace GhostHunterLauncher
         {
             ServicePointManager.SecurityProtocol |= SecurityProtocolType.Tls12;
             Http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
-            Http.DefaultRequestHeaders.UserAgent.ParseAdd("WhoHauntsLauncher/1.2");
+            Http.DefaultRequestHeaders.UserAgent.ParseAdd("ExtraLifeLauncher/" + LauncherUpdater.CurrentVersion);
         }
 
-        /// <summary>Newest game build.</summary>
-        public static Task<ReleaseInfo> GetLatestGameAsync()
+        /// <summary>Newest build of <paramref name="game"/>.</summary>
+        public static Task<ReleaseInfo> GetLatestGameAsync(GameInfo game)
         {
-            return GetLatestAsync(LauncherConfig.RepoOwner, LauncherConfig.RepoName, LauncherConfig.AssetName,
-                LauncherConfig.IncludePrereleases, ".zip");
+            return GetLatestAsync(game.RepoOwner, game.RepoName, game.AssetName, game.IncludePrereleases, ".zip");
         }
 
         /// <summary>Newest launcher build (full releases only).</summary>

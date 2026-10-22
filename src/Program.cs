@@ -2,11 +2,12 @@ using System;
 using System.Threading;
 using System.Windows.Forms;
 
-namespace GhostHunterLauncher
+namespace ExtraLifeLauncher
 {
     static class Program
     {
-        // Also named in installer/GhostHunterLauncher.iss (AppMutex) so setup can ask to close the launcher.
+        // Also named in installer/ExtraLifeLauncher.iss (AppMutex) so setup can ask to close the launcher.
+        // Unchanged since "Ghost Hunter", so a new setup also sees an older launcher running.
         const string MutexName = "GhostHunterLauncher.SingleInstance";
 
         [STAThread]
